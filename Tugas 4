@@ -1,0 +1,168 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <EEPROM.h>
+
+#define BH1750_ADDRESS 0x23
+#define BH1750_DATALEN 2
+#define LED1 3
+#define LED2 4
+#define LED3 16
+#define LED4 17
+#define BUTTON_PIN 15
+#define EEPROM_SIZE 1
+
+bool autoBrightness = false;
+unsigned char led_status = LOW;
+
+void bh1750Request(int address);
+int bh1750Read(int address);
+
+byte buff[2];
+unsigned short lux = 0;
+byte ledArray[4] = {LED1, LED2, LED3, LED4};
+void ledInit();
+void oneLed();
+void twoLed();
+void triLed();
+void forLed();
+void zeroLed();
+portMUX_TYPE gpioIntMux = portMUX_INITIALIZER_UNLOCKED;
+
+// membuat fungsi pada saat FALLING atau RISING tercapai
+void IRAM_ATTR gpioISR(){
+  portENTER_CRITICAL (&gpioIntMux);
+  autoBrightness = true;
+  led_status = !led_status;
+  portEXIT_CRITICAL (&gpioIntMux);
+  }
+void setup() {
+  // put your setup code here, to run once:
+  Wire.begin();
+  Serial.begin(9600);
+
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  pinMode(LED3, OUTPUT);
+  pinMode(LED4, OUTPUT);
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(BUTTON_PIN, &gpioISR, FALLING);
+
+  
+
+  // Read autobrightness status
+  Serial.println("Start reading autobrightness status....");
+  EEPROM.begin(EEPROM_SIZE);
+  delay(100);
+  led_status = EEPROM.read(0);
+  digitalWrite(BUILTIN_LED, led_status);
+
+  Serial.println();
+  if(autoBrightness){
+    Serial.println("(SETUP) autobrightness is active");
+    autoBrightness = true;
+  } else {
+    Serial.println("(SETUP) autobrightness is not active");
+    autoBrightness = false;
+    forLed();
+  }
+  }
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  bh1750Request(BH1750_ADDRESS);
+  delay(200);
+
+  if (bh1750Read(BH1750_ADDRESS) == BH1750_DATALEN)
+  {
+    lux = (((unsigned short)buff[0] << 8) | (unsigned short)buff[1]) / 1.2;
+    Serial.print("lux: ");
+    Serial.println(lux);
+
+    if (autoBrightness){
+      
+      if (lux > 0 && lux <= 250) {
+        Serial.println("(MAIN) Turn on 4 LED");
+        forLed();
+      }
+      else if (lux > 250 && lux <= 500){
+        Serial.println("(MAIN) Turn on 3 LED");
+        triLed();
+      }
+      else if (lux > 500 && lux <= 750){
+        Serial.println("(MAIN) Turn on 2 LED");
+        twoLed();
+      }
+      else if (lux > 750 && lux <= 1000){
+        Serial.println("(MAIN) Turn on 1 LED");
+        oneLed();
+      }
+      else{
+        Serial.println("(MAIN) Turn off all LED");
+        zeroLed();
+      }
+  }
+  delay(1000);
+}
+// Check Button
+if (digitalRead(BUTTON_PIN) == LOW) {
+    if (autoBrightness){
+    Serial.println("(MAIN) autobrightness mode: on");
+    autoBrightness = true;
+    } else {
+    Serial.println("(MAIN) autobrightness mode: off");
+    autoBrightness = false;
+    }
+}
+}
+
+void bh1750Request(int address){
+  Wire.beginTransmission(address);
+  Wire.write(0x10);
+  Wire.endTransmission();
+}
+
+int bh1750Read(int address){
+  int i = 0;
+
+  Wire.beginTransmission(address);
+  Wire.requestFrom(address, 2);
+  while (Wire.available())
+  {
+    buff[i] = Wire.read();
+    i++;
+  }
+  Wire.endTransmission();
+
+  return i;
+}
+void oneLed(){
+  digitalWrite(LED1, HIGH);
+  digitalWrite(LED2, LOW);
+  digitalWrite(LED3, LOW);
+  digitalWrite(LED4, LOW);
+}
+void twoLed(){
+  digitalWrite(LED1, HIGH);
+  digitalWrite(LED2, HIGH);
+  digitalWrite(LED3, LOW);
+  digitalWrite(LED4, LOW);
+}
+void triLed(){
+  digitalWrite(LED1, HIGH);
+  digitalWrite(LED2, HIGH);
+  digitalWrite(LED3, HIGH);
+  digitalWrite(LED4, LOW);
+}
+void forLed(){
+  digitalWrite(LED1, HIGH);
+  digitalWrite(LED2, HIGH);
+  digitalWrite(LED3, HIGH);
+  digitalWrite(LED4, HIGH);
+}
+void zeroLed(){
+  digitalWrite(LED1, LOW);
+  digitalWrite(LED2, LOW);
+  digitalWrite(LED3, LOW);
+  digitalWrite(LED4, LOW);
+}
