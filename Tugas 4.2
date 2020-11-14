@@ -1,0 +1,174 @@
+#include <Arduino.h>
+#include <EEPROM.h>
+#include <SPI.h>
+#include <Wire.h>
+
+#define EEPROM_SIZE 32 
+
+
+#define BH1750_ADDRESS 0x23
+#define BH1750_DATALEN 2
+#define LED1 4
+#define LED2 16
+#define LED3 17
+#define LED4 3
+#define BUTTON_PIN 15
+
+volatile bool changeLedStatus = false;
+bool autoBrightness = false;
+
+void bh1750Request(int address);
+int bh1750Read(int address);
+
+char readData[32], receivedData[32];
+int dataIndex = 0; 
+
+void readEEPROM(int address, char * data);
+void writeEEPROM(int address, char * data);
+
+byte buff[2] = "";
+byte ledArray[4] = {LED1, LED2, LED3, LED4};
+unsigned short lux = 0;
+void ledOn (int ledNumber);
+void ledInit(); 
+portMUX_TYPE gpioIntMux = portMUX_INITIALIZER_UNLOCKED;
+
+void IRAM_ATTR gpioISR(){
+  portENTER_CRITICAL(&gpioIntMux);
+  changeLedStatus = true;
+  portEXIT_CRITICAL(&gpioIntMux);
+}
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(9600);
+  Wire.begin();
+  ledInit();
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(BUTTON_PIN, &gpioISR, FALLING);
+
+  //initialize EEPROM
+  EEPROM.begin(EEPROM_SIZE);
+  delay(100);
+  readEEPROM(0, readData);
+  Serial.print("Isi EEPROM: ");
+  Serial.println(readData);
+  //readEEPROM(PASS_ADDRESS, readDataPASS);
+  autoBrightness = EEPROM.read(0);
+  if (autoBrightness){
+    Serial.println("Autobrightness On");
+  }
+  else{
+    Serial.println("Autobrightness Off");
+    ledOn(4);
+  }
+  }
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  if(Serial.available()){
+    receivedData[dataIndex] = Serial.read();
+    dataIndex++;
+
+    if(receivedData[dataIndex - 1] == '\n'){ // '\n' sebagai penanda bahwa data sudah selesai dikirim
+      dataIndex = 0;
+      writeEEPROM(0, receivedData);
+      memset(receivedData, 0, EEPROM_SIZE);
+    }
+  }
+
+  bh1750Request(BH1750_ADDRESS);
+  delay(200);
+
+  if (bh1750Read(BH1750_ADDRESS) == BH1750_DATALEN)
+  {
+    lux = (((unsigned short)buff[0] << 8) | (unsigned short)buff[1]) / 1.2;
+    Serial.print("lux: ");
+    Serial.println(lux);
+    if (autoBrightness){
+      if (lux > 0 && lux <= 250) {
+        Serial.println("(MAIN) Turn on 4 LED");
+        ledOn(4);
+      }
+      else if (lux > 250 && lux <= 500){
+        Serial.println("(MAIN) Turn on 3 LED");
+        ledOn(3);
+      }
+      else if (lux > 500 && lux <= 750){
+        Serial.println("(MAIN) Turn on 2 LED");
+        ledOn(2);
+      }
+      else if (lux > 750 && lux <= 1000){
+        Serial.println("(MAIN) Turn on 1 LED");
+        ledOn(1);
+      }
+    else{
+      Serial.println("(MAIN) Turn off all LED");
+      ledOn(0);
+      }
+    }
+   }
+  if(changeLedStatus){
+    portENTER_CRITICAL(&gpioIntMux);
+    changeLedStatus = false;
+    portEXIT_CRITICAL(&gpioIntMux);
+
+    autoBrightness = !autoBrightness;
+    if (autoBrightness){
+      Serial.println("Autobrightness On");
+    }
+    else{
+      Serial.println("Autobrightness Off");
+    }
+    
+    EEPROM.write(0, autoBrightness);
+    EEPROM.commit();
+  }
+}
+//fungsi untuk read data dari EEPROM
+void readEEPROM(int address, char * data){
+  for (int i = 0; i < EEPROM_SIZE; i++){
+    data[i] = EEPROM.read(address + i);
+  }
+}
+void writeEEPROM(int address, char * data){
+  Serial.println("Start Writing to EEPROM");
+  for (int i = 0; i < EEPROM_SIZE; i++){
+    EEPROM.write(address + i, data[i]);
+  }
+  EEPROM.commit();
+}
+void bh1750Request(int address){
+  Wire.beginTransmission(address);
+  Wire.write(0x10);
+  Wire.endTransmission();
+}
+
+int bh1750Read(int address){
+  int i = 0;
+
+  Wire.beginTransmission(address);
+  Wire.requestFrom(address, 2);
+  while (Wire.available())
+  {
+    buff[i] = Wire.read();
+    i++;
+  }
+  Wire.endTransmission();
+
+  return i;
+}
+void ledOn (int ledNumber) {
+  for (int i = 0; i < ledNumber; i++) {
+    digitalWrite(ledArray[i], HIGH);
+  }
+  for (int i = 0; i < 4 - ledNumber; i++){
+    digitalWrite(ledArray[3 - i], LOW);
+  }
+  
+}
+void ledInit(){
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  pinMode(LED3, OUTPUT);
+  pinMode(LED4, OUTPUT);
+}
