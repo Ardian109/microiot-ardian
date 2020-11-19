@@ -1,0 +1,169 @@
+#include <Arduino.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <BluetoothSerial.h>
+#include <DHT.h>
+
+#define BH1750_ADDRESS 0x23
+#define BH1750_DATALEN 2
+#define LED_PIN 18
+#define LED_CHANNEL 0
+#define PWM_FREQ 5000
+#define PWM_RESOLUTION 8
+#define DHT_PIN 5
+#define DHT_TYPE DHT11
+
+DHT dht(DHT_PIN, DHT_TYPE);
+BluetoothSerial serialBT;
+float temp = 0, humid = 0;
+int lastTransmit = 0;
+String receivedString;
+
+void bh1750Request(int address);
+int bh1750Read(int address);
+
+bool autoBrightness = false;
+
+byte buff[2] = "";
+unsigned short lux = 0;
+int dutyCycle = 0;
+
+void setup()
+{
+  // put your setup code here, to run once:
+  Serial.begin(9600);
+  Wire.begin();
+  serialBT.begin("ESP32-BTClassic");
+  dht.begin();
+  pinMode(BUILTIN_LED, OUTPUT);
+  ledcSetup(LED_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(LED_PIN, LED_CHANNEL);
+}
+
+void loop()
+{
+  // put your main code here, to run repeatedly:
+  bh1750Request(BH1750_ADDRESS);
+  temp = dht.readTemperature();
+  humid = dht.readHumidity();
+  Serial.print("humidity: ");
+  Serial.println(humid);
+  Serial.print("temperature: ");
+  Serial.println(temp);
+  delay(200);
+
+  if (bh1750Read(BH1750_ADDRESS) == BH1750_DATALEN)
+  {
+    lux = (((unsigned short)buff[0] << 8) | (unsigned short)buff[1]) / 1.2;
+    Serial.print("lux: ");
+    Serial.println(lux);
+
+    dutyCycle = 255 - (lux / 10);
+    Serial.print("duty cycle: ");
+    Serial.println(dutyCycle);
+    if (autoBrightness)
+    {
+      if (lux > 0 && lux <= 2500)
+      {
+        ledcWrite(LED_CHANNEL, dutyCycle);
+      }
+      else if (lux > 2500)
+      {
+        ledcWrite(LED_CHANNEL, 0);
+      }
+    }
+
+      if (serialBT.available())
+      {
+        char receivedChar = serialBT.read();
+        receivedString += receivedChar;
+
+        if (receivedChar == '\n')
+        {
+          if (receivedString == "Temp\r\n")
+          {
+            digitalWrite(BUILTIN_LED, HIGH);
+            Serial.println("Temp On LED");
+            serialBT.println("Temp On LED");
+
+            String sentence = "Data sensor -> Suhu: " + String(temp) + " C";
+            serialBT.println(sentence);
+            Serial.println(sentence);
+            digitalWrite(BUILTIN_LED, LOW);
+            Serial.println("Temp Off LED");
+            serialBT.println("Temp Off LED");
+          }
+          else if (receivedString == "Humid\r\n")
+          {
+            digitalWrite(BUILTIN_LED, HIGH);
+            Serial.println("Humidity On LED");
+            serialBT.println("Humidity On LED");
+
+            String sentence = "Data sensor Kelembaban: " + String(humid) + " %";
+            serialBT.println(sentence);
+            Serial.println(sentence);
+            digitalWrite(BUILTIN_LED, LOW);
+            Serial.println("Humidity Off LED");
+            serialBT.println("Humidity Off LED");
+          }
+          else if (receivedString == "Lux\r\n")
+          {
+            digitalWrite(BUILTIN_LED, HIGH);
+            Serial.println("Lux On LED");
+            serialBT.println("Lux On LED");
+
+            String sentence = "Data sensor Lux: " + String(lux) + " lx";
+            serialBT.println(sentence);
+            Serial.println(sentence);
+            digitalWrite(BUILTIN_LED, LOW);
+            Serial.println("Lux Off LED");
+            serialBT.println("Lux Off LED");
+            
+          }
+          else if (receivedString == "Autobrighton\r\n")
+          {
+            autoBrightness = true;
+            Serial.println("Autobrightness On");
+            serialBT.println("Autobrightness On");
+          }
+          else if (receivedString == "Autobrightoff\r\n")
+          {
+            autoBrightness = false;
+            Serial.println("Autobrightness Off");
+            serialBT.println("Autobrightness Off");
+          }
+          else
+          {
+            Serial.println("Could not recognized command");
+            serialBT.println("Could not recognized command");
+          }
+
+          receivedString = "";
+          serialBT.flush();
+        }
+      }
+    
+  }
+}
+void bh1750Request(int address)
+{
+  Wire.beginTransmission(address);
+  Wire.write(0x10);
+  Wire.endTransmission();
+}
+
+int bh1750Read(int address)
+{
+  int i = 0;
+
+  Wire.beginTransmission(address);
+  Wire.requestFrom(address, 2);
+  while (Wire.available())
+  {
+    buff[i] = Wire.read();
+    i++;
+  }
+  Wire.endTransmission();
+
+  return i;
+}
